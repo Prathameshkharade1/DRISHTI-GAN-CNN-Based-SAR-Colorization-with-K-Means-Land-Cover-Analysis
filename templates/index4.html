@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LULC K-Means Classification</title>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    body {
+      background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
+      color: white;
+      font-family: 'Poppins', sans-serif;
+      min-height: 100vh;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+    }
+    .container {
+      background: rgba(255,255,255,0.1);
+      backdrop-filter: blur(10px);
+      padding: 30px;
+      border-radius: 20px;
+      width: 420px;
+      text-align: center;
+      box-shadow: 0 4px 30px rgba(0,0,0,0.2);
+    }
+    input[type="file"], button {
+      margin-top: 15px;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 15px;
+    }
+    input[type="file"] {
+      background: rgba(255,255,255,0.2);
+      color: white;
+    }
+    button {
+      background: #00bcd4;
+      color: white;
+      transition: 0.3s;
+    }
+    button:hover {
+      background: #019ab0;
+    }
+    img {
+      width: 100%;
+      border-radius: 10px;
+      margin-top: 15px;
+      display: none;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>LULC Classification (K-Means)</h1>
+    <p>Select a satellite or aerial image for land cover classification.</p>
+    <input type="file" id="imageInput" accept="image/*" />
+    <button onclick="uploadImage()">Upload & Analyze</button>
+    <img id="preview" alt="Preview Image" />
+  </div>
+
+<script>
+async function uploadImage() {
+  const fileInput = document.getElementById('imageInput');
+  if (!fileInput.files.length) {
+    alert('Please select an image first.');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('image', fileInput.files[0]);
+
+  const resp = await fetch('/upload', { method: 'POST', body: formData });
+  const data = await resp.json();
+
+  if (data.image_url) {
+    // Show preview
+    document.getElementById('preview').src = data.image_url;
+    document.getElementById('preview').style.display = 'block';
+    
+    // Redirect to results page with query param
+    setTimeout(() => {
+      window.location.href = `/analyze?image=${encodeURIComponent(data.filename)}`;
+    }, 1000);
+  } else {
+    alert('Upload failed: ' + data.error);
+  }
+}
+</script>
+</body>
+</html>

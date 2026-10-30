@@ -1,0 +1,257 @@
+<!--
+Frontend for Multi-Stage Geolocate App
+File: geolocate_frontend.html
+
+Instructions:
+1. Put this file in your Flask app's `templates` folder or serve it as static HTML.
+2. The frontend expects the backend upload endpoint to be at: /upload (POST, multipart/form-data with field name 'image').
+3. It uses Tailwind CSS (via CDN) and Leaflet (via CDN). No build step required.
+4. Open this file in a browser (or visit the route from Flask sending this file). It will allow image upload, show preview, show progress, display API JSON responses, and plot returned coordinates on a Leaflet map.
+
+Notes:
+- If you host your Flask app on a different origin, set `API_BASE` variable below accordingly.
+- If the returned result contains multiple steps, the frontend will show each step and try to pick `final` coords if present. It will also show neighbors (from CLIP+FAISS) if returned.
+-->
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Multi-stage Image Geolocate — Frontend</title>
+
+  <!-- Tailwind CDN (for convenience) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-sA+e2mY3kq0pGqGJtT6eK0h7rjv0Cg2v3MoirV+Yk4M=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-o9N1j8g1Wk7w2x+2gqf3k4u2P8x2b8n6e+XQ1qfF0Po=" crossorigin=""></script>
+
+  <style>
+    /* small extra styles */
+    #map { height: 360px; }
+    pre.json-output { max-height: 300px; overflow: auto; background: #0b1220; color: #d1d5db; padding: 12px; border-radius: 8px; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800">
+  <div class="container mx-auto p-6">
+    <h1 class="text-2xl font-semibold mb-3">Multi-stage Image Geolocate — Frontend</h1>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+      <!-- Left: Upload card -->
+      <div class="col-span-1 md:col-span-1 bg-white p-4 rounded-lg shadow">
+        <label class="block text-sm font-medium text-slate-700 mb-2">Select image</label>
+        <input id="imageInput" type="file" accept="image/*" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-slate-100" />
+        <div id="previewWrapper" class="mt-4 hidden">
+          <p class="text-xs text-slate-500 mb-1">Preview</p>
+          <img id="preview" src="" alt="preview" class="w-full h-auto rounded border" />
+        </div>
+
+        <div class="mt-4">
+          <button id="uploadBtn" class="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700">Upload & Analyze</button>
+        </div>
+
+        <div class="mt-3 text-sm text-slate-500">
+          <p>API Endpoint: <span id="apiEndpoint" class="font-mono text-xs text-slate-700">/upload</span></p>
+        </div>
+
+        <div id="progressBlock" class="mt-3 hidden">
+          <p class="text-xs text-slate-500">Upload progress</p>
+          <div class="w-full bg-slate-100 rounded-md h-3 overflow-hidden mt-1">
+            <div id="progressBar" style="width:0%" class="h-full bg-green-500"></div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Middle: Map & results -->
+      <div class="col-span-1 md:col-span-2 space-y-4">
+        <div class="bg-white p-4 rounded-lg shadow">
+          <h2 class="text-lg font-medium mb-2">Map</h2>
+          <div id="map" class="rounded"></div>
+          <div class="mt-2 flex gap-2">
+            <button id="zoomToAll" class="px-3 py-1 bg-slate-200 rounded">Zoom to results</button>
+            <button id="clearMap" class="px-3 py-1 bg-slate-200 rounded">Clear markers</button>
+          </div>
+        </div>
+
+        <div class="bg-white p-4 rounded-lg shadow">
+          <h2 class="text-lg font-medium mb-2">API Response (parsed)</h2>
+          <div id="parsedResults" class="space-y-2 text-sm text-slate-700">
+            <div id="finalPlace" class="p-2 bg-slate-50 rounded border text-sm"></div>
+            <div id="stepsList" class="space-y-2"></div>
+          </div>
+        </div>
+
+        <div class="bg-white p-4 rounded-lg shadow">
+          <h2 class="text-lg font-medium mb-2">Raw JSON</h2>
+          <pre id="rawJson" class="json-output">{}</pre>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    // Configuration: set API base if backend is elsewhere
+    const API_BASE = '';
+    const UPLOAD_URL = API_BASE + '/upload';
+
+    // Map Setup
+    const map = L.map('map').setView([20.59,78.96], 4); // center India by default
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    let markers = [];
+
+    function addMarker(lat, lon, popupHtml) {
+      const m = L.marker([lat, lon]).addTo(map);
+      if (popupHtml) m.bindPopup(popupHtml);
+      markers.push(m);
+      return m;
+    }
+
+    function clearMarkers() {
+      markers.forEach(m => map.removeLayer(m));
+      markers = [];
+    }
+
+    document.getElementById('clearMap').onclick = () => { clearMarkers(); };
+    document.getElementById('zoomToAll').onclick = () => {
+      if (markers.length === 0) return;
+      const group = new L.featureGroup(markers);
+      map.fitBounds(group.getBounds().pad(0.2));
+    };
+
+    const imageInput = document.getElementById('imageInput');
+    const previewWrapper = document.getElementById('previewWrapper');
+    const preview = document.getElementById('preview');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const rawJson = document.getElementById('rawJson');
+    const stepsList = document.getElementById('stepsList');
+    const finalPlace = document.getElementById('finalPlace');
+    const progressBlock = document.getElementById('progressBlock');
+    const progressBar = document.getElementById('progressBar');
+
+    let selectedFile = null;
+
+    imageInput.addEventListener('change', (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      selectedFile = f;
+      const url = URL.createObjectURL(f);
+      preview.src = url;
+      previewWrapper.classList.remove('hidden');
+    });
+
+    uploadBtn.addEventListener('click', async () => {
+      if (!selectedFile) { alert('Please choose an image first'); return; }
+      clearMarkers();
+      stepsList.innerHTML = '';
+      finalPlace.innerHTML = '';
+      rawJson.textContent = '{ }';
+
+      const form = new FormData();
+      form.append('image', selectedFile);
+
+      progressBlock.classList.remove('hidden');
+      progressBar.style.width = '0%';
+
+      try {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', UPLOAD_URL, true);
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            progressBar.style.width = pct + '%';
+          }
+        };
+        xhr.onreadystatechange = () => {
+          if (xhr.readyState === 4) {
+            progressBlock.classList.add('hidden');
+            if (xhr.status === 200) {
+              try {
+                const data = JSON.parse(xhr.responseText);
+                renderResponse(data);
+              } catch (err) {
+                alert('Failed to parse response JSON');
+                rawJson.textContent = xhr.responseText;
+              }
+            } else {
+              alert('Upload failed: ' + xhr.statusText + ' (' + xhr.status + ')');
+              rawJson.textContent = xhr.responseText;
+            }
+          }
+        };
+        xhr.send(form);
+      } catch (err) {
+        progressBlock.classList.add('hidden');
+        alert('Upload error: ' + err.message);
+      }
+    });
+
+    function renderResponse(data) {
+      rawJson.textContent = JSON.stringify(data, null, 2);
+      stepsList.innerHTML = '';
+
+      // try to extract final coords
+      let final = data.final || null;
+      if (!final && Array.isArray(data.steps)) {
+        // choose last step
+        final = data.steps[data.steps.length-1];
+      }
+
+      // If final has coords directly
+      let coords = null;
+      if (final && final.coords) coords = final.coords;
+      else if (final && final.aggregated) coords = final.aggregated;
+      else if (final && final.landmark && final.landmark.locations && final.landmark.locations[0]) coords = final.landmark.locations[0];
+
+      // Show steps
+      if (Array.isArray(data.steps)) {
+        data.steps.forEach((s, i) => {
+          const el = document.createElement('div');
+          el.className = 'p-2 border rounded bg-slate-50';
+          el.innerHTML = `<div class="text-sm font-semibold">Step ${i+1}: ${s.method || 'unknown'}</div><div class="text-xs mt-1">${escapeHtml(JSON.stringify(s, null, 2))}</div>`;
+          stepsList.appendChild(el);
+
+          // If step contains coordinates or neighbors, add markers
+          if (s.coords) {
+            addMarker(s.coords.lat, s.coords.lon, `<strong>${s.method}</strong><br/>${s.place || ''}`);
+          }
+          if (s.landmark && s.landmark.locations) {
+            s.landmark.locations.forEach(l => addMarker(l.lat, l.lon, `<strong>${s.method} - ${s.landmark.description}</strong>`));
+          }
+          if (s.neighbors) {
+            // neighbors returned by CLIP_FAISS
+            s.neighbors.forEach(n => {
+              const m = n.meta || n;
+              if (m.lat && m.lon) addMarker(m.lat, m.lon, `<strong>neighbor</strong><br/>dist: ${n.dist.toFixed(4)}`);
+            });
+          }
+        });
+      }
+
+      // Show final place summary
+      if (coords && (coords.lat || coords.latitude)) {
+        const lat = coords.lat || coords.latitude || coords[0];
+        const lon = coords.lon || coords.longitude || coords[1];
+        finalPlace.innerHTML = `<div class="text-sm font-semibold">Final estimate</div><div class="text-xs mt-1">Lat: ${lat.toFixed(6)}, Lon: ${lon.toFixed(6)}</div><div class="text-xs text-slate-500 mt-1">Method: ${final.method || 'unknown'}</div>`;
+        addMarker(lat, lon, `<strong>Final estimate</strong><br/>method: ${final.method || 'unknown'}`);
+        map.setView([lat, lon], 12);
+      } else {
+        finalPlace.innerHTML = `<div class="text-sm font-semibold">No precise coords</div><div class="text-xs text-slate-500 mt-1">See step outputs above for details.</div>`;
+      }
+
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+  </script>
+</body>
+</html>

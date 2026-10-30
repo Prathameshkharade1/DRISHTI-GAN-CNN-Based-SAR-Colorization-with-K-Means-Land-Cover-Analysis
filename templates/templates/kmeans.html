@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>LULC K-Means Classifier</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen">
+    <h1 class="text-3xl font-bold mb-6">Unsupervised LULC Classification (K-Means)</h1>
+    <input type="file" id="imageUpload" accept="image/*" class="mb-4 p-2 bg-gray-700 rounded" onchange="previewImage(event)" />
+    <img id="preview" src="https://placehold.co/200x150/333/FFF?text=Preview" class="rounded mb-4 w-64 h-48 object-contain">
+    <button onclick="classify()" class="bg-blue-600 px-6 py-2 rounded hover:bg-blue-700">Run Classification</button>
+
+    <div class="mt-6 w-3/4 max-w-xl">
+        <h2 class="text-2xl mb-3">Results:</h2>
+        <img id="classifiedImage" class="rounded-lg shadow mb-4" style="display:none;">
+        <ul id="summaryList" class="text-sm list-disc pl-5"></ul>
+    </div>
+
+    <script>
+        let uploadedImage = null;
+
+        function previewImage(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(ev) {
+                document.getElementById("preview").src = ev.target.result;
+                uploadedImage = ev.target.result;
+            }
+            reader.readAsDataURL(file);
+        }
+
+        async function classify() {
+            if (!uploadedImage) return alert("Upload an image first!");
+            const res = await fetch("http://127.0.0.1:5001/classify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ image: uploadedImage })
+            });
+            const data = await res.json();
+            if (data.error) return alert("Error: " + data.error);
+            document.getElementById("classifiedImage").src = data.classified_image;
+            document.getElementById("classifiedImage").style.display = "block";
+            const list = document.getElementById("summaryList");
+            list.innerHTML = "";
+            data.summary.forEach(s => {
+                const li = document.createElement("li");
+                li.textContent = s;
+                list.appendChild(li);
+            });
+        }
+    </script>
+</body>
+</html>

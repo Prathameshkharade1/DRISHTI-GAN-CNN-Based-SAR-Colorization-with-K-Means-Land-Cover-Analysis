@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SAR Image Colorizer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet" />
+  <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #0b0c10;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+    }
+    #satellite-bg {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      overflow: hidden;
+      z-index: -1;
+      background: radial-gradient(circle at center, #0b0c10 40%, #1f2833 100%);
+    }
+    .satellite {
+      position: absolute;
+      width: 40px; height: 40px;
+      background: url('https://upload.wikimedia.org/wikipedia/commons/thumb/7/74/Satellite_icon.svg/1024px-Satellite_icon.svg.png') no-repeat center center;
+      background-size: contain;
+      animation: float 10s ease-in-out infinite;
+    }
+    .beam {
+      position: absolute;
+      top: 40px; left: 50%;
+      width: 4px; height: 150px;
+      background: rgba(0, 255, 0, 0.4);
+      transform: translateX(-50%);
+      animation: scan 3s ease-in-out infinite;
+      border-radius: 2px;
+      box-shadow: 0 0 10px rgba(0, 255, 0, 0.6);
+    }
+    @keyframes float { 0%,100%{transform:translateY(0)}50%{transform:translateY(-20px)} }
+    @keyframes scan { 0%,100%{transform:rotate(-15deg) translateX(-50%)}50%{transform:rotate(15deg) translateX(-50%)} }
+  </style>
+</head>
+
+<body>
+  <div id="satellite-bg">
+    <div class="satellite" style="top: 20%; left: 10%;"><div class="beam"></div></div>
+    <div class="satellite" style="top: 60%; left: 80%;"><div class="beam"></div></div>
+    <div class="satellite" style="top: 40%; left: 50%;"><div class="beam"></div></div>
+  </div>
+
+  <main class="flex justify-center items-center w-full max-w-6xl p-4 relative z-10">
+    <div class="flex flex-col md:flex-row w-full bg-gray-900 bg-opacity-85 rounded-2xl shadow-2xl overflow-hidden backdrop-blur-sm" data-aos="fade-up" data-aos-duration="1000">
+
+      <!-- LEFT PANEL -->
+      <div class="w-full md:w-1/3 p-8 flex flex-col items-center justify-center space-y-6 border-b md:border-b-0 md:border-r border-gray-700">
+        <h2 class="text-3xl md:text-4xl font-extrabold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent text-center">
+          SAR Image Colorizer
+        </h2>
+
+        <input id="imageUpload" type="file" accept="image/*"
+          class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-purple-600 file:text-white hover:file:bg-purple-700 cursor-pointer transition duration-300 ease-in-out"
+          onchange="previewImage(event)" />
+
+        <p class="text-center text-gray-400 text-sm">PNG, JPG, JPEG, GIF up to 10MB</p>
+
+        <div id="uploadedImageContainer" class="mt-4 w-full flex justify-center items-center h-48 bg-gray-800 rounded-lg overflow-hidden border border-gray-700">
+          <img id="uploadedImagePreview" src="https://placehold.co/200x150/333333/FFFFFF?text=No+Image"
+            class="max-w-full max-h-full object-contain rounded-lg shadow-md" />
+        </div>
+
+        <button id="colorizeButton"
+          class="w-full py-3 px-6 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold rounded-full shadow-lg hover:from-purple-700 hover:to-indigo-700 transition transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50"
+          onclick="colorizeImage()" disabled>Colorize</button>
+
+        <button id="analyzeButton"
+          class="w-full py-3 px-6 bg-gradient-to-r from-pink-500 to-red-600 text-white font-bold rounded-full shadow-lg hover:from-pink-600 hover:to-red-700 transition transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-pink-500 disabled:opacity-50"
+          onclick="analyzeImage()" disabled>Analyze</button>
+
+        <button id="downloadButton"
+          class="w-full mt-4 py-3 px-6 bg-gradient-to-r from-teal-500 to-green-600 text-white font-bold rounded-full shadow-lg hover:from-teal-600 hover:to-green-700 transition transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-50"
+          onclick="downloadColorizedImage()" disabled>Download</button>
+      </div>
+
+      <!-- RIGHT PANEL -->
+      <div class="w-full md:w-2/3 p-8 flex flex-col items-center justify-start space-y-4">
+        <h2 class="text-3xl md:text-4xl font-extrabold bg-gradient-to-r from-purple-400 to-pink-600 bg-clip-text text-transparent mb-2 text-center">
+          Colorized Output
+        </h2>
+
+        <div id="colorizedImageContainer" class="w-full h-96 bg-gray-800 rounded-lg overflow-hidden flex justify-center items-center border border-gray-700 shadow-md">
+          <img id="colorizedImagePreview" src="https://placehold.co/400x300/333333/FFFFFF?text=Colorized+Image"
+            class="max-w-full max-h-full object-contain rounded-lg shadow-md" />
+        </div>
+
+        <p id="statusMessage" class="mt-2 text-sm text-gray-400 text-center"></p>
+      </div>
+    </div>
+  </main>
+
+<script>
+AOS.init();
+
+let uploadedDataURL = null;
+let colorizedDataURL = null;
+let lastColorizedFilename = null;   // ⭐ NEW VARIABLE
+
+
+// -------------------------------------------------------------
+//  PREVIEW IMAGE
+// -------------------------------------------------------------
+function previewImage(event) {
+  const file = event.target.files?.[0];
+  const uploadedPreview = document.getElementById('uploadedImagePreview');
+  const colorizeButton = document.getElementById('colorizeButton');
+  const analyzeButton = document.getElementById('analyzeButton');
+  const downloadButton = document.getElementById('downloadButton');
+
+  if (!file) {
+    uploadedPreview.src = "https://placehold.co/200x150/333333/FFFFFF?text=No+Image";
+    uploadedDataURL = null;
+    colorizeButton.disabled = true;
+    analyzeButton.disabled = true;
+    downloadButton.disabled = true;
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    uploadedDataURL = e.target.result;
+    uploadedPreview.src = uploadedDataURL;
+
+    colorizeButton.disabled = false;
+    analyzeButton.disabled = true;   // disabled until colorization
+    downloadButton.disabled = true;
+  };
+  reader.readAsDataURL(file);
+}
+
+
+// -------------------------------------------------------------
+//  COLORIZE (NO REDIRECT)
+// -------------------------------------------------------------
+async function colorizeImage() {
+  if (!uploadedDataURL) return status("Please upload an image first.", true);
+  setBusyState(true);
+
+  try {
+    const resp = await fetch('/colorize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: uploadedDataURL })
+    });
+
+    const data = await resp.json();
+    if (!resp.ok) return status("❌ " + (data.error || JSON.stringify(data)), true);
+
+    colorizedDataURL = data.colorized_image;
+    lastColorizedFilename = data.filename;  // ⭐ STORE FOR ANALYSIS LATER
+
+    document.getElementById('colorizedImagePreview').src = colorizedDataURL;
+    document.getElementById('downloadButton').disabled = false;
+
+    // ENABLE ANALYZE BUTTON NOW
+    document.getElementById('analyzeButton').disabled = false;
+
+    status("Colorization complete. Click Analyze to continue.");
+
+  } catch (err) {
+    status("❌ Error: " + err.message, true);
+  } finally {
+    setBusyState(false);
+  }
+}
+
+
+// -------------------------------------------------------------
+//  ANALYZE → REDIRECT TO RESULTS PAGE
+// -------------------------------------------------------------
+function analyzeImage() {
+  if (!lastColorizedFilename)
+    return status("Please colorize the image first.", true);
+
+  status("Redirecting to analysis...");
+  
+  window.location.href = "/results.html?file=" + encodeURIComponent(lastColorizedFilename);
+}
+
+
+// -------------------------------------------------------------
+function downloadColorizedImage() {
+  if (!colorizedDataURL) return status("No colorized image yet.", true);
+  const a = document.createElement('a');
+  a.href = colorizedDataURL;
+  a.download = 'colorized.png';
+  a.click();
+}
+
+function setBusyState(busy) {
+  const c = document.getElementById('colorizeButton');
+  const a = document.getElementById('analyzeButton');
+  const d = document.getElementById('downloadButton');
+
+  if (busy) {
+    c.textContent = 'Processing...';
+    c.disabled = true;
+    a.disabled = true;
+    d.disabled = true;
+  } else {
+    c.textContent = 'Colorize';
+    a.disabled = !colorizedDataURL;
+    d.disabled = !colorizedDataURL;
+  }
+}
+
+function status(msg, isError=false) {
+  const el = document.getElementById('statusMessage');
+  el.textContent = msg;
+  el.className = isError
+    ? 'mt-2 text-sm text-red-400 text-center'
+    : 'mt-2 text-sm text-gray-400 text-center';
+}
+
+document.addEventListener('mousemove', (e) => {
+  const sats = document.querySelectorAll('.satellite');
+  const x = (e.clientX / window.innerWidth - 0.5) * 40;
+  const y = (e.clientY / window.innerHeight - 0.5) * 40;
+  sats.forEach(s => s.style.transform = `translate(${x}px, ${y}px)`);
+});
+</script>
+
+</body>
+</html>
